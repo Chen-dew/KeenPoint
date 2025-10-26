@@ -1,0 +1,34 @@
+# 项目信息
+name: Academic Paper Assistant
+description: AI 学术论文辅助网站后端
+version: 0.1.0
+author: AI Assistant
+
+# 功能特性
+features:
+  - 文档解析 (PDF/Word)
+  - 结构分析 (章节识别)
+  - 图像管理 (提取与分类)
+  - PPT 生成 (自动演示文稿)
+
+# 技术栈
+tech_stack:
+  framework: FastAPI
+  language: Python 3.8+
+  document_parsing:
+    - PyMuPDF
+    - python-docx
+  presentation: python-pptx
+  testing: pytest
+
+# API 端点
+api_endpoints:
+  upload: /api/v1/upload/
+  analysis: /api/v1/analysis/structure
+  images: /api/v1/images/extract
+  ppt: /api/v1/ppt/generate
+
+# 文档
+docs:
+  swagger: /docs
+  redoc: /redoc
