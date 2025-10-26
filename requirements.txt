@@ -4,8 +4,11 @@ python-multipart==0.0.6
 pydantic==2.5.3
 pydantic-settings==2.1.0
 
+# 异步 HTTP 客户端
+aiohttp==3.9.1
+aiofiles==23.2.1
+
 # 文档解析
-PyMuPDF==1.23.8
 python-docx==1.1.0
 
 # PPT 生成
