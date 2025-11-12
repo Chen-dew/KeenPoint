@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api/v1"
     
     # 文件上传配置
-    UPLOAD_DIR: str = "uploads"
+    UPLOAD_DIR: str = r"D:\MyFiles\AIPPT\Code\keenPoint\uploads"
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
-    ALLOWED_EXTENSIONS: list = ["pdf", "doc", "docx"]
+    ALLOWED_EXTENSIONS: list = ["pdf", "doc", "docx", "txt"]
     
     # 文件存储配置
     STATIC_DIR: str = "static"
@@ -52,8 +52,21 @@ class Settings(BaseSettings):
     IMAGE_QUALITY: int = 85
     
     # MinerU API 配置
-    MINERU_API: str = "https://mineru.net/api/v4/extract/task"
-    MINERU_TOKEN: str = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI2OTMwMDM4MCIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2MjE0NzMxMywiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiN2QyMWJjNjctOGI0ZC00YmQyLTgxMjItYmEzOWIxYWQ5MDZlIiwiZW1haWwiOiIiLCJleHAiOjE3NjMzNTY5MTN9.gZWhu-PKDvLA52rJn9n0hb8XpkYTeqG0bIDNJ3nRjLG7GoFhTUyb8RTPOg03jNxq9uvZPUElliFxqZyT2_20VA"
+    MINERU_API_TOKEN: str = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI2OTMwMDM4MCIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2MjE0NzMxMywiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiN2QyMWJjNjctOGI0ZC00YmQyLTgxMjItYmEzOWIxYWQ5MDZlIiwiZW1haWwiOiIiLCJleHAiOjE3NjMzNTY5MTN9.gZWhu-PKDvLA52rJn9n0hb8XpkYTeqG0bIDNJ3nRjLG7GoFhTUyb8RTPOg03jNxq9uvZPUElliFxqZyT2_20VA"
+    MINERU_MODEL_VERSION: str = "pipeline"  # or "vlm"
+    MINERU_UPLOAD_URL: str = "https://mineru.net/api/v4/file-urls/batch"
+    MINERU_RESULT_URL: str = "https://mineru.net/api/v4/extract-results/batch"
+    MINERU_POLL_INTERVAL: int = 10  # seconds
+    MINERU_DOWNLOAD_DIR: str = "./downloads"
+    
+    @property
+    def MINERU_HEADERS(self):
+        """MinerU API request headers"""
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.MINERU_API_TOKEN}"
+        }
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
