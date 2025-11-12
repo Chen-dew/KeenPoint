@@ -53,8 +53,7 @@ class Settings(BaseSettings):
     
     # MinerU API 配置
     MINERU_API: str = "https://mineru.net/api/v4/extract/task"
-    MINERU_TOKEN: str = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI2OTMwMDM4MCIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2MTAzNzA0OCwiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiY2QzMzFiMTktMzA5ZS00ZWQ0LWI1YmMtMzlkZTNlNjdhNTIxIiwiZW1haWwiOiIiLCJleHAiOjE3NjIyNDY2NDh9.QaMbpoavk4PXd6FIKMIU9lOxHVJ8n0MSafqE8gTp4xFtbNJRcHNHLso5yBlIGwIXLDNMPUZJboV_FIkJfcO6Xg"
-    
+    MINERU_TOKEN: str = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI2OTMwMDM4MCIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2MjE0NzMxMywiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiN2QyMWJjNjctOGI0ZC00YmQyLTgxMjItYmEzOWIxYWQ5MDZlIiwiZW1haWwiOiIiLCJleHAiOjE3NjMzNTY5MTN9.gZWhu-PKDvLA52rJn9n0hb8XpkYTeqG0bIDNJ3nRjLG7GoFhTUyb8RTPOg03jNxq9uvZPUElliFxqZyT2_20VA"
     class Config:
         env_file = ".env"
         case_sensitive = True
