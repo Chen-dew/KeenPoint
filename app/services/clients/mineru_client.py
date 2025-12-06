@@ -1,8 +1,6 @@
 import os
-import json
 import asyncio
 import aiohttp
-import aiofiles
 import zipfile
 import io
 from pathlib import Path
@@ -117,7 +115,7 @@ async def main(file_paths=None):
         file_paths: List of PDF file paths to process. If None, uses default test file.
     """
     if file_paths is None:
-        file_paths = ["D:\\MyFiles\\AIPPT\\Code\\keenPoint\\test.pdf"]
+        file_paths = ["D:\\MyFiles\\AIPPT\\Data\\Lin_HRank_Filter_Pruning_Using_High-Rank_Feature_Map_CVPR_2020_paper.pdf"]
     
     async with aiohttp.ClientSession() as session:
         logger.info("Applying for upload URLs...")

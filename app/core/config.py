@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     NLP_MODEL: str = "default"
     MAX_TEXT_LENGTH: int = 1000000  # 最大处理文本长度
     
+    # DashScope (阿里云百炼) 配置
+    DASHSCOPE_API_KEY: Optional[str] = "sk-ede7a86133d54732b59b8b6b4596ad31"
+    DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    DASHSCOPE_MODEL: str = "deepseek-v3.2"
+    
     # PPT 生成配置
     PPT_DEFAULT_TEMPLATE: str = "default"
     PPT_MAX_SLIDES: int = 50
@@ -52,8 +57,8 @@ class Settings(BaseSettings):
     IMAGE_QUALITY: int = 85
     
     # MinerU API 配置
-    MINERU_API_TOKEN: str = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI2OTMwMDM4MCIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2MjE0NzMxMywiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiN2QyMWJjNjctOGI0ZC00YmQyLTgxMjItYmEzOWIxYWQ5MDZlIiwiZW1haWwiOiIiLCJleHAiOjE3NjMzNTY5MTN9.gZWhu-PKDvLA52rJn9n0hb8XpkYTeqG0bIDNJ3nRjLG7GoFhTUyb8RTPOg03jNxq9uvZPUElliFxqZyT2_20VA"
-    MINERU_MODEL_VERSION: str = "pipeline"  # or "vlm"
+    MINERU_API_TOKEN: str = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI2OTMwMDM4MCIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2NDkxNjA4NCwiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiOTY3OTFmOWYtNTZiOS00ZjI3LTgyYjEtYmU1OTM5OWRlMGZhIiwiZW1haWwiOiIiLCJleHAiOjE3NjYxMjU2ODR9.qgCbgHxh-uJDRrQ43SHATSgMrzvAq7oWBXsedrWnM8kaYRUdGKQAqcLDz1HTky5yjTjlt6PCgdj0RBwK_PUkiA"
+    MINERU_MODEL_VERSION: str = "vlm"  # "pipeline" or "vlm"
     MINERU_UPLOAD_URL: str = "https://mineru.net/api/v4/file-urls/batch"
     MINERU_RESULT_URL: str = "https://mineru.net/api/v4/extract-results/batch"
     MINERU_POLL_INTERVAL: int = 10  # seconds

@@ -1,217 +1,419 @@
 """
-NLP 服务
-提供自然语言处理功能，包括结构分析、关键词提取和摘要生成
+NLP服务模块
+处理论文文档的NLP分析任务，包括章节分段、摘要生成等
 """
 
-import re
-from typing import Dict, List
-from collections import Counter
+from typing import List, Dict, Any, Optional
+from pathlib import Path
 from app.core.logger import logger
+from app.services.clients.nlp_client import nlp_client
+import re
+import json
+import time
 
-def analyze_structure(text: str) -> Dict:
-    """
-    分析论文结构 - 识别章节
+
+class NLPService:
+    """NLP服务类"""
     
-    使用关键词匹配方法识别学术论文的标准章节
+    def __init__(self):
+        self.max_segment_length = 10000
+        self.system_prompt = self._load_system_prompt()
     
-    参数:
-    - text: 论文文本内容
+    def _load_system_prompt(self) -> str:
+        """加载系统提示词"""
+        try:
+            prompt_path = Path(__file__).parent / "prompt" / "TextUnderstandingAgent.txt"
+            if prompt_path.exists():
+                with open(prompt_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    logger.info(f"系统提示词加载成功，长度: {len(content)} 字符")
+                    return content
+            else:
+                logger.warning(f"系统提示词文件不存在: {prompt_path}")
+                return ""
+        except Exception as e:
+            logger.error(f"加载系统提示词失败: {e}")
+            return ""
     
-    返回:
-    - 结构分析结果
-    """
-    logger.info("🔍 开始分析论文结构...")
-    
-    # 标准学术论文章节关键词
-    section_keywords = {
-        "Abstract": ["abstract", "摘要"],
-        "Introduction": ["introduction", "引言", "绪论"],
-        "Related Work": ["related work", "literature review", "相关工作", "文献综述"],
-        "Methodology": ["methodology", "methods", "approach", "方法", "方法论"],
-        "Experiment": ["experiment", "experimental", "实验"],
-        "Results": ["results", "结果"],
-        "Discussion": ["discussion", "讨论"],
-        "Conclusion": ["conclusion", "conclusions", "结论"],
-        "References": ["references", "bibliography", "参考文献"]
-    }
-    
-    # 转为小写便于匹配
-    text_lower = text.lower()
-    
-    # 检测到的章节
-    detected_sections = []
-    section_details = {}
-    
-    for section_name, keywords in section_keywords.items():
-        for keyword in keywords:
-            # 使用正则表达式查找章节标题
-            pattern = rf'\b{re.escape(keyword)}\b'
-            matches = list(re.finditer(pattern, text_lower))
-            
-            if matches:
-                detected_sections.append(section_name)
-                section_details[section_name] = {
-                    "keyword_matched": keyword,
-                    "occurrences": len(matches),
-                    "first_position": matches[0].start()
+    def extract_and_split_sections(self, parse_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        从 parse_service 返回结果中提取 sections，并对超长内容进行拆分
+        
+        Args:
+            parse_result: parse_service.parse_markdown_file() 的返回结果
+                格式: {
+                    "sections": [...],
+                    "figures": [...],
+                    "formulas": [...],
+                    "tables": [...],
+                    "metadata": {...}
                 }
-                break  # 找到一个匹配就跳出
+        
+        Returns:
+            List[Dict]: 分段后的数组，每个元素包含:
+                - id: 唯一标识符，格式 "section_index" 或 "section_index_part_N"
+                - name: 章节名称
+                - content: 章节内容（拆分后的片段）
+                - original_section_index: 原始章节索引
+                - is_split: 是否为拆分片段
+                - part_index: 如果拆分，表示第几部分（从1开始）
+                - total_parts: 如果拆分，总共几部分
+        
+        Example:
+            >>> result = parse_markdown_file("paper.md")
+            >>> segments = nlp_service.extract_and_split_sections(result)
+            >>> # 输出示例：
+            >>> [
+            >>>     {"id": "0", "name": "Introduction", "content": "...", ...},
+            >>>     {"id": "1_part_1", "name": "Methods (Part 1/3)", "content": "...", ...},
+            >>>     {"id": "1_part_2", "name": "Methods (Part 2/3)", "content": "...", ...},
+            >>>     {"id": "1_part_3", "name": "Methods (Part 3/3)", "content": "...", ...},
+            >>> ]
+        """
+        sections = parse_result.get("sections", [])
+        
+        if not sections:
+            logger.warning("parse_result 中没有 sections 数据")
+            return []
+        
+        logger.info(f"开始处理 {len(sections)} 个章节")
+        
+        segments = []
+        
+        for section_idx, section in enumerate(sections):
+            name = section.get("name", f"Section {section_idx}")
+            content = section.get("content", "")
+            word_count = len(content)
+            
+            # 如果内容未超过最大长度，直接添加
+            if word_count <= self.max_segment_length:
+                segments.append({
+                    "id": str(section_idx),
+                    "name": name,
+                    "content": content,
+                    "original_section_index": section_idx,
+                    "is_split": False,
+                    "part_index": None,
+                    "total_parts": 1
+                })
+                logger.debug(f"章节 {section_idx} '{name}': {word_count} 字符，无需拆分")
+            else:
+                # 需要拆分
+                split_segments = self._split_long_content(
+                    content=content,
+                    section_name=name,
+                    section_index=section_idx
+                )
+                segments.extend(split_segments)
+                logger.info(f"章节 {section_idx} '{name}': {word_count} 字符，拆分为 {len(split_segments)} 部分")
+        
+        logger.info(f"处理完成，共生成 {len(segments)} 个片段")
+        return segments
     
-    # 按照在文本中出现的位置排序
-    detected_sections = sorted(
-        detected_sections,
-        key=lambda x: section_details[x]["first_position"]
-    )
+    def _split_long_content(self, content: str, section_name: str, section_index: int) -> List[Dict[str, Any]]:
+        """
+        拆分超长内容为多个片段
+        
+        优先在段落边界拆分，如果单个段落过长则在句子边界拆分
+        
+        Args:
+            content: 章节内容
+            section_name: 章节名称
+            section_index: 章节索引
+        
+        Returns:
+            List[Dict]: 拆分后的片段列表
+        """
+        # 先按段落拆分（连续两个换行符）
+        paragraphs = re.split(r'\n\s*\n', content)
+        
+        segments = []
+        current_segment = ""
+        
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+            
+            # 如果当前段落本身就超长，需要在句子边界拆分
+            if len(paragraph) > self.max_segment_length:
+                # 先保存已累积的内容
+                if current_segment:
+                    segments.append(current_segment.strip())
+                    current_segment = ""
+                
+                # 拆分超长段落
+                sub_segments = self._split_by_sentences(paragraph)
+                segments.extend(sub_segments)
+            else:
+                # 检查加入当前段落后是否超长
+                if len(current_segment) + len(paragraph) + 2 <= self.max_segment_length:
+                    # 未超长，累加
+                    if current_segment:
+                        current_segment += "\n\n" + paragraph
+                    else:
+                        current_segment = paragraph
+                else:
+                    # 超长，保存当前累积内容，开始新片段
+                    if current_segment:
+                        segments.append(current_segment.strip())
+                    current_segment = paragraph
+        
+        # 添加最后剩余的内容
+        if current_segment:
+            segments.append(current_segment.strip())
+        
+        # 如果没有成功拆分（整个内容没有段落分隔），强制按长度拆分
+        if not segments:
+            segments = self._split_by_length(content)
+        
+        # 构建返回结果
+        total_parts = len(segments)
+        result = []
+        
+        for part_idx, segment_content in enumerate(segments, 1):
+            result.append({
+                "id": f"{section_index}_part_{part_idx}",
+                "name": f"{section_name} (Part {part_idx}/{total_parts})",
+                "content": segment_content,
+                "original_section_index": section_index,
+                "is_split": True,
+                "part_index": part_idx,
+                "total_parts": total_parts
+            })
+        
+        return result
     
-    result = {
-        "sections_detected": detected_sections,
-        "section_count": len(detected_sections),
-        "details": section_details
-    }
+    def _split_by_sentences(self, text: str) -> List[str]:
+        """
+        按句子边界拆分文本
+        
+        支持中英文句子分隔符：。！？.!?
+        """
+        # 句子分隔符（中英文）
+        sentence_pattern = r'([。！？\.!?]+[\s]*)'
+        sentences = re.split(sentence_pattern, text)
+        
+        # 重新组合句子和分隔符
+        combined_sentences = []
+        for i in range(0, len(sentences) - 1, 2):
+            if i + 1 < len(sentences):
+                combined_sentences.append(sentences[i] + sentences[i + 1])
+            else:
+                combined_sentences.append(sentences[i])
+        
+        # 按最大长度组合句子
+        segments = []
+        current_segment = ""
+        
+        for sentence in combined_sentences:
+            if len(current_segment) + len(sentence) <= self.max_segment_length:
+                current_segment += sentence
+            else:
+                if current_segment:
+                    segments.append(current_segment.strip())
+                current_segment = sentence
+        
+        if current_segment:
+            segments.append(current_segment.strip())
+        
+        # 如果仍然无法拆分（单个句子超长），强制按长度拆分
+        if not segments or any(len(seg) > self.max_segment_length for seg in segments):
+            return self._split_by_length(text)
+        
+        return segments
     
-    logger.info(f"✅ 结构分析完成，检测到 {len(detected_sections)} 个章节: {', '.join(detected_sections)}")
+    def _split_by_length(self, text: str) -> List[str]:
+        """
+        强制按固定长度拆分文本（最后手段）
+        """
+        segments = []
+        start = 0
+        
+        while start < len(text):
+            end = start + self.max_segment_length
+            segments.append(text[start:end])
+            start = end
+        
+        return segments
     
-    return result
+    def analyze_segments_with_abstract(
+        self, 
+        segments: List[Dict[str, Any]], 
+        abstract: str,
+        skip_abstract_section: bool = True
+    ) -> List[Dict[str, Any]]:
+        """分析章节片段，拆分章节的后续部分将接收前面部分的摘要作为上下文"""
+        if not segments:
+            logger.warning("没有需要分析的片段")
+            return []
+        
+        if not self.system_prompt:
+            logger.error("系统提示词未加载，无法进行分析")
+            return []
+        
+        logger.info(f"开始分析，片段数: {len(segments)}, Abstract长度: {len(abstract)}")
+        
+        results = []
+        skipped_count = 0
+        split_section_summaries = {}
+        
+        for idx, segment in enumerate(segments, 1):
+            segment_id = segment.get("id", str(idx))
+            segment_name = segment.get("name", "Unknown Section")
+            segment_content = segment.get("content", "")
+            is_split = segment.get("is_split", False)
+            original_section_index = segment.get("original_section_index")
+            part_index = segment.get("part_index")
+            
+            if skip_abstract_section:
+                name_lower = segment_name.lower()
+                if "abstract" in name_lower or "摘要" in segment_name:
+                    logger.info(f"跳过Abstract章节: {segment_id}")
+                    skipped_count += 1
+                    continue
+            
+            previous_summaries = None
+            if is_split and part_index and part_index > 1:
+                if original_section_index in split_section_summaries:
+                    previous_summaries = split_section_summaries[original_section_index]
+                    logger.info(f"使用前置摘要: {segment_id}, 前置部分数: {len(previous_summaries)}")
+            
+            user_prompt = self._build_user_prompt(abstract, segment_name, segment_content, previous_summaries)
+            logger.info(f"分析进度: [{idx}/{len(segments)}], ID: {segment_id}")
+            
+            max_retries = 3
+            retry_count = 0
+            analysis_result = None
+            last_error = None
+            
+            while retry_count < max_retries:
+                try:
+                    nlp_response = nlp_client.chat_sync(
+                        prompt=user_prompt,
+                        system_prompt=self.system_prompt
+                    )
+                    analysis_result = self._parse_nlp_response(nlp_response, segment_id, segment_name)
+                    break
+                except Exception as e:
+                    retry_count += 1
+                    last_error = e
+                    error_msg = str(e)
+                    
+                    if "peer closed connection" in error_msg or "incomplete chunked read" in error_msg:
+                        logger.warning(f"网络错误，重试: {retry_count}/{max_retries}, ID: {segment_id}")
+                        if retry_count < max_retries:
+                            wait_time = retry_count * 2
+                            logger.info(f"等待重试: {wait_time}秒")
+                            time.sleep(wait_time)
+                            continue
+                    else:
+                        logger.error(f"分析失败: {segment_id}, 错误: {error_msg}")
+                        break
+            
+            if analysis_result:
+                analysis_result["id"] = segment_id
+                
+                if is_split and original_section_index is not None:
+                    if original_section_index not in split_section_summaries:
+                        split_section_summaries[original_section_index] = []
+                    split_section_summaries[original_section_index].append({
+                        "part_index": part_index,
+                        "summary": analysis_result.get("summary", "")
+                    })
+                    
+                    if previous_summaries:
+                        analysis_result["previous_part_summary"] = " ".join([s["summary"] for s in previous_summaries])
+                
+                results.append(analysis_result)
+                logger.info(f"分析完成: {segment_id}")
+            else:
+                error_msg = str(last_error) if last_error else "未知错误"
+                logger.error(f"分析失败，已重试{max_retries}次: {segment_id}, 错误: {error_msg}")
+                results.append({
+                    "id": segment_id,
+                    "section_name": segment_name,
+                    "summary": f"分析失败，已重试{max_retries}次: {error_msg}",
+                    "key_points": [],
+                    "error": error_msg,
+                    "retry_count": retry_count
+                })
+        
+        success_count = len([r for r in results if not r.get('error')])
+        failure_count = len([r for r in results if r.get('error')])
+        logger.info(f"分析完成，成功: {success_count}, 失败: {failure_count}, 跳过: {skipped_count}")
+        return results
+    
+    def _build_user_prompt(
+        self, 
+        abstract: str, 
+        section_name: str, 
+        section_content: str,
+        previous_summaries: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
+        """构建用户提示词"""
+        prompt = f"""abstract: {abstract}
 
-def extract_keywords(text: str, top_n: int = 10) -> List[str]:
-    """
-    提取关键词
-    
-    使用简单的词频统计方法提取关键词
-    (实际应用中可使用 TF-IDF 或更复杂的算法)
-    
-    参数:
-    - text: 文本内容
-    - top_n: 返回前 N 个关键词
-    
-    返回:
-    - 关键词列表
-    """
-    logger.info(f"🔑 开始提取关键词 (Top {top_n})...")
-    
-    # 清理文本
-    text_clean = re.sub(r'[^\w\s]', ' ', text.lower())
-    
-    # 停用词列表（简化版）
-    stop_words = {
-        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-        'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
-        'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-        'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these',
-        'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which',
-        'who', 'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both',
-        'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
-        'only', 'own', 'same', 'so', 'than', 'too', 'very'
-    }
-    
-    # 分词
-    words = text_clean.split()
-    
-    # 过滤停用词和短词
-    filtered_words = [
-        word for word in words
-        if word not in stop_words and len(word) > 3
-    ]
-    
-    # 统计词频
-    word_freq = Counter(filtered_words)
-    
-    # 获取最常见的词
-    keywords = [word for word, freq in word_freq.most_common(top_n)]
-    
-    logger.info(f"✅ 关键词提取完成: {', '.join(keywords[:5])}...")
-    
-    return keywords
+name: {section_name}"""
 
-def generate_summary(text: str, max_length: int = 200) -> str:
-    """
-    生成文本摘要
-    
-    使用简单的句子提取方法生成摘要
-    (实际应用中可使用 BERT 等预训练模型)
-    
-    参数:
-    - text: 文本内容
-    - max_length: 摘要最大长度
-    
-    返回:
-    - 生成的摘要
-    """
-    logger.info("📝 开始生成摘要...")
-    
-    # 分句
-    sentences = re.split(r'[.!?]+', text)
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-    
-    if not sentences:
-        return "无法生成摘要：文本过短。"
-    
-    # 简单策略：取前几句作为摘要
-    summary = ""
-    for sentence in sentences[:5]:  # 最多取前5句
-        if len(summary) + len(sentence) > max_length:
-            break
-        summary += sentence + ". "
-    
-    if not summary:
-        summary = sentences[0][:max_length] + "..."
-    
-    logger.info(f"✅ 摘要生成完成，长度: {len(summary)}")
-    
-    return summary.strip()
+        if previous_summaries:
+            previous_text = " ".join([f"Part {s['part_index']}: {s['summary']}" for s in previous_summaries])
+            prompt += f"""
 
-def detect_language(text: str) -> str:
-    """
-    检测文本语言
-    
-    简单的语言检测（中文/英文）
-    
-    参数:
-    - text: 文本内容
-    
-    返回:
-    - 语言代码 ('zh' 或 'en')
-    """
-    # 统计中文字符数量
-    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
-    
-    # 统计英文字符数量
-    english_chars = len(re.findall(r'[a-zA-Z]', text))
-    
-    if chinese_chars > english_chars:
-        return "zh"
-    else:
-        return "en"
+previous_parts_summary: {previous_text}"""
+        
+        prompt += f"""
 
-def extract_citations(text: str) -> List[str]:
-    """
-    提取引用信息
+content: {section_content}"""
+        
+        return prompt
     
-    参数:
-    - text: 文本内容
-    
-    返回:
-    - 引用列表
-    """
-    # 简单的引用模式匹配 [1], [2], etc.
-    citations = re.findall(r'\[\d+\]', text)
-    return list(set(citations))  # 去重
+    def _parse_nlp_response(self, nlp_response: Dict[str, Any], segment_id: str, segment_name: str) -> Dict[str, Any]:
+        """解析NLP响应"""
+        try:
+            answer = nlp_response.get("answer", "")
+            if not answer:
+                logger.warning(f"响应为空: {segment_id}")
+                return {"section_name": segment_name, "summary": "", "key_points": []}
+            
+            json_str = answer
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
+            
+            parsed = json.loads(json_str)
+            result = {
+                "section_name": parsed.get("section_name", segment_name),
+                "summary": parsed.get("summary", ""),
+                "key_points": parsed.get("key_points", [])
+            }
+            
+            usage = nlp_response.get("usage", {})
+            if usage:
+                logger.debug(f"Token使用: {segment_id}, {usage}")
+            
+            return result
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON解析失败: {segment_id}, 错误: {e}")
+            return {"section_name": segment_name, "summary": answer, "key_points": []}
+        except Exception as e:
+            logger.error(f"解析异常: {segment_id}, 错误: {e}")
+            return {"section_name": segment_name, "summary": "", "key_points": []}
 
-def count_figures_and_tables(text: str) -> Dict:
-    """
-    统计图表数量
-    
-    参数:
-    - text: 文本内容
-    
-    返回:
-    - 统计结果
-    """
-    figures = len(re.findall(r'Figure\s+\d+|图\s*\d+', text, re.IGNORECASE))
-    tables = len(re.findall(r'Table\s+\d+|表\s*\d+', text, re.IGNORECASE))
-    
-    return {
-        "figures": figures,
-        "tables": tables,
-        "total": figures + tables
-    }
+
+nlp_service = NLPService()
+
+
+def extract_and_split_sections(parse_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """提取并拆分章节"""
+    return nlp_service.extract_and_split_sections(parse_result)
+
+
+def analyze_segments_with_abstract(
+    segments: List[Dict[str, Any]], 
+    abstract: str,
+    skip_abstract_section: bool = True
+) -> List[Dict[str, Any]]:
+    """分析章节片段"""
+    return nlp_service.analyze_segments_with_abstract(segments, abstract, skip_abstract_section)
