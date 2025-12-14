@@ -108,21 +108,25 @@ class MarkdownParser:
                 content = f.read()
             
             json_data = None
+            json_file_path = None
             if json_path:
                 json_data = self._extract_from_json(Path(json_path))
+                json_file_path = Path(json_path)
             else:
                 json_candidates = list(md_path.parent.glob("*content_list.json"))
                 if json_candidates:
                     json_data = self._extract_from_json(json_candidates[0])
+                    json_file_path = json_candidates[0]
             
-            return self.parse_markdown_content(content, md_path.parent, json_data)
+            return self.parse_markdown_content(content, md_path.parent, json_data, json_file_path)
         
         except Exception as e:
             logger.error(f"MD文件解析失败: {e}")
             raise
     
     def parse_markdown_content(self, content: str, base_path: Optional[Path] = None, 
-                              json_data: Optional[Dict] = None) -> Dict[str, Any]:
+                              json_data: Optional[Dict] = None, json_file_path: Optional[Path] = None) -> Dict[str, Any]:
+        """解析 Markdown 内容用于文档总结"""
         headings = self._extract_headings(content)
         
         if json_data:
@@ -136,14 +140,11 @@ class MarkdownParser:
             tables = self._extract_tables(content, base_path)
             logger.info("使用Markdown数据源")
         
-        sections = self._build_sections(content, headings, figures, formulas, tables)
+        sections = self._build_sections_from_json(json_file_path, figures, formulas, tables) if json_file_path else self._build_sections(content, headings, figures, formulas, tables)
         metadata = self._calculate_metadata(sections, figures, formulas, tables)
         
         return {
             "sections": sections,
-            "figures": figures,
-            "formulas": formulas,
-            "tables": tables,
             "metadata": metadata
         }
     
@@ -233,18 +234,14 @@ class MarkdownParser:
     def _build_sections(self, content: str, headings: List[Dict], figures: List[Dict], 
                        formulas: List[Dict], tables: List[Dict]) -> List[Dict[str, Any]]:
         if not headings:
-            word_count = self._count_words(content)
             return [{
                 "name": "Document",
                 "level": 0,
                 "path": "Document",
                 "content": content.strip(),
-                "word_count": word_count,
-                "direct_char_count": len(content.strip()),
-                "total_char_count": len(content.strip()),
-                "fig_refs": self._find_item_ids_in_section(figures, content, "image"),
-                "table_refs": self._find_item_ids_in_section(tables, content, "table"),
-                "formula_refs": self._find_item_ids_in_section(formulas, content, "equation")
+                "fig_refs": self._find_items_in_section(figures, content, "image"),
+                "table_refs": self._find_items_in_section(tables, content, "table"),
+                "formula_refs": self._find_items_in_section(formulas, content, "equation")
             }]
         
         sections = []
@@ -255,12 +252,9 @@ class MarkdownParser:
             lines = section_content.split('\n')
             pure_content = '\n'.join(lines[1:]).strip()
             
-            word_count = self._count_words(pure_content)
-            direct_char_count = len(pure_content)
-            
-            fig_ids = self._find_item_ids_in_section(figures, pure_content, "image")
-            table_ids = self._find_item_ids_in_section(tables, pure_content, "table")
-            formula_ids = self._find_item_ids_in_section(formulas, pure_content, "equation")
+            fig_data = self._find_items_in_section(figures, pure_content, "image")
+            table_data = self._find_items_in_section(tables, pure_content, "table")
+            formula_data = self._find_items_in_section(formulas, pure_content, "equation")
             
             current_level = heading["level"]
             while path_stack and path_stack[-1]["level"] >= current_level:
@@ -274,28 +268,145 @@ class MarkdownParser:
                 "level": current_level,
                 "path": path,
                 "content": pure_content,
-                "word_count": word_count,
-                "direct_char_count": direct_char_count,
-                "total_char_count": 0,
-                "fig_refs": fig_ids,
-                "table_refs": table_ids,
-                "formula_refs": formula_ids
+                "fig_refs": fig_data,
+                "table_refs": table_data,
+                "formula_refs": formula_data
             })
-        
-        for i, section in enumerate(sections):
-            total = section["direct_char_count"]
-            for j in range(i + 1, len(sections)):
-                if sections[j]["level"] > section["level"]:
-                    total += sections[j]["direct_char_count"]
-                else:
-                    break
-            section["total_char_count"] = total
         
         return sections
     
-    def _find_item_ids_in_section(self, items: List[Dict], section_content: str, 
-                                   item_type: str) -> List[int]:
-        item_ids = []
+    def _build_sections_from_json(self, json_file_path: Path, figures: List[Dict], 
+                                   formulas: List[Dict], tables: List[Dict]) -> List[Dict[str, Any]]:
+        """从 JSON 文件构建章节，并根据位置分配图表公式"""
+        try:
+            with open(json_file_path, 'r', encoding='utf-8') as f:
+                content_list = json.load(f)
+        except Exception as e:
+            logger.error(f"JSON 文件读取失败: {e}")
+            return []
+        
+        # 构建章节结构
+        sections = []
+        current_section = None
+        path_stack = []
+        
+        # 为每个图表公式建立索引映射（在 content_list 中的位置）
+        element_positions = {}
+        image_idx = table_idx = equation_idx = 1
+        
+        for idx, item in enumerate(content_list):
+            item_type = item.get("type")
+            if item_type == "image":
+                element_positions[f"image_{image_idx}"] = idx
+                image_idx += 1
+            elif item_type == "table":
+                element_positions[f"table_{table_idx}"] = idx
+                table_idx += 1
+            elif item_type == "equation":
+                element_positions[f"equation_{equation_idx}"] = idx
+                equation_idx += 1
+        
+        # 遍历构建章节
+        for idx, item in enumerate(content_list):
+            item_type = item.get("type")
+            text = item.get("text", "").strip()
+            
+            if item_type == "text" and text:
+                text_level = item.get("text_level", 0)
+                
+                if text_level > 0:
+                    # 这是一个标题
+                    level = text_level
+                    
+                    # 保存上一个章节
+                    if current_section:
+                        sections.append(current_section)
+                    
+                    # 更新路径栈
+                    while path_stack and path_stack[-1]["level"] >= level:
+                        path_stack.pop()
+                    
+                    path_stack.append({"name": text, "level": level, "index": idx})
+                    path = " > ".join([p["name"] for p in path_stack])
+                    
+                    # 创建新章节
+                    current_section = {
+                        "name": text,
+                        "level": level,
+                        "path": path,
+                        "content": "",
+                        "start_index": idx,
+                        "fig_refs": [],
+                        "table_refs": [],
+                        "formula_refs": []
+                    }
+                else:
+                    # 这是正文内容
+                    if current_section is None:
+                        # 没有标题的情况，创建默认章节
+                        current_section = {
+                            "name": "Document",
+                            "level": 0,
+                            "path": "Document",
+                            "content": "",
+                            "start_index": 0,
+                            "fig_refs": [],
+                            "table_refs": [],
+                            "formula_refs": []
+                        }
+                    
+                    # 添加内容
+                    if current_section["content"]:
+                        current_section["content"] += "\n\n"
+                    current_section["content"] += text
+        
+        # 添加最后一个章节
+        if current_section:
+            sections.append(current_section)
+        
+        # 为每个章节分配图表公式
+        for section in sections:
+            section_start = section.get("start_index", 0)
+            # 找到下一个章节的起始位置
+            section_end = len(content_list)
+            for other_section in sections:
+                if other_section.get("start_index", 0) > section_start:
+                    section_end = min(section_end, other_section.get("start_index", 0))
+            
+            # 分配图片
+            for fig in figures:
+                fig_key = f"image_{fig['id']}"
+                if fig_key in element_positions:
+                    pos = element_positions[fig_key]
+                    if section_start <= pos < section_end:
+                        section["fig_refs"].append(fig)
+            
+            # 分配表格
+            for tbl in tables:
+                tbl_key = f"table_{tbl['id']}"
+                if tbl_key in element_positions:
+                    pos = element_positions[tbl_key]
+                    if section_start <= pos < section_end:
+                        section["table_refs"].append(tbl)
+            
+            # 分配公式
+            for eq in formulas:
+                eq_key = f"equation_{eq['id']}"
+                if eq_key in element_positions:
+                    pos = element_positions[eq_key]
+                    if section_start <= pos < section_end:
+                        section["formula_refs"].append(eq)
+            
+            # 删除临时字段
+            section.pop("start_index", None)
+        
+        logger.info(f"从 JSON 构建章节: {len(sections)} 个")
+        return sections
+    
+    def _find_items_in_section(self, items: List[Dict], section_content: str, 
+                               item_type: str) -> List[Dict]:
+        """查找章节中的图表公式，返回完整数据"""
+        found_items = []
         
         for item in items:
             item_id = item.get("id")
@@ -322,9 +433,9 @@ class MarkdownParser:
                         found = True
             
             if found:
-                item_ids.append(item_id)
+                found_items.append(item)
         
-        return item_ids
+        return found_items
     
     def _count_words(self, text: str) -> int:
         text = re.sub(r'[#*`_\[\]()!]', '', text)
@@ -352,9 +463,7 @@ class MarkdownParser:
 markdown_parser = MarkdownParser()
 
 
-def parse_markdown_file(file_path: str, json_path: Optional[str] = None) -> Dict[str, Any]:
+def parse_markdown_for_summary(file_path: str, json_path: Optional[str] = None) -> Dict[str, Any]:
+    """解析 Markdown 文件用于文档总结"""
     return markdown_parser.parse_markdown_file(file_path, json_path)
 
-
-def parse_markdown_content(content: str) -> Dict[str, Any]:
-    return markdown_parser.parse_markdown_content(content)

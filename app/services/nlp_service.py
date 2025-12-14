@@ -1,12 +1,8 @@
-"""
-NLP服务模块
-处理论文文档的NLP分析任务，包括章节分段、摘要生成等
-"""
+"""NLP服务模块：文档章节分段与分析"""
 
 from typing import List, Dict, Any, Optional
-from pathlib import Path
 from app.core.logger import logger
-from app.services.clients.nlp_client import nlp_client
+from app.services.clients.dify_client import analyze_text
 import re
 import json
 import time
@@ -17,76 +13,23 @@ class NLPService:
     
     def __init__(self):
         self.max_segment_length = 10000
-        self.system_prompt = self._load_system_prompt()
-    
-    def _load_system_prompt(self) -> str:
-        """加载系统提示词"""
-        try:
-            prompt_path = Path(__file__).parent / "prompt" / "TextUnderstandingAgent.txt"
-            if prompt_path.exists():
-                with open(prompt_path, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    logger.info(f"系统提示词加载成功，长度: {len(content)} 字符")
-                    return content
-            else:
-                logger.warning(f"系统提示词文件不存在: {prompt_path}")
-                return ""
-        except Exception as e:
-            logger.error(f"加载系统提示词失败: {e}")
-            return ""
     
     def extract_and_split_sections(self, parse_result: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        从 parse_service 返回结果中提取 sections，并对超长内容进行拆分
-        
-        Args:
-            parse_result: parse_service.parse_markdown_file() 的返回结果
-                格式: {
-                    "sections": [...],
-                    "figures": [...],
-                    "formulas": [...],
-                    "tables": [...],
-                    "metadata": {...}
-                }
-        
-        Returns:
-            List[Dict]: 分段后的数组，每个元素包含:
-                - id: 唯一标识符，格式 "section_index" 或 "section_index_part_N"
-                - name: 章节名称
-                - content: 章节内容（拆分后的片段）
-                - original_section_index: 原始章节索引
-                - is_split: 是否为拆分片段
-                - part_index: 如果拆分，表示第几部分（从1开始）
-                - total_parts: 如果拆分，总共几部分
-        
-        Example:
-            >>> result = parse_markdown_file("paper.md")
-            >>> segments = nlp_service.extract_and_split_sections(result)
-            >>> # 输出示例：
-            >>> [
-            >>>     {"id": "0", "name": "Introduction", "content": "...", ...},
-            >>>     {"id": "1_part_1", "name": "Methods (Part 1/3)", "content": "...", ...},
-            >>>     {"id": "1_part_2", "name": "Methods (Part 2/3)", "content": "...", ...},
-            >>>     {"id": "1_part_3", "name": "Methods (Part 3/3)", "content": "...", ...},
-            >>> ]
-        """
+        """提取章节并拆分超长内容"""
         sections = parse_result.get("sections", [])
-        
         if not sections:
-            logger.warning("parse_result 中没有 sections 数据")
+            logger.warning("无 sections 数据")
             return []
         
-        logger.info(f"开始处理 {len(sections)} 个章节")
-        
+        logger.info(f"开始处理章节，共 {len(sections)} 个")
         segments = []
         
         for section_idx, section in enumerate(sections):
             name = section.get("name", f"Section {section_idx}")
             content = section.get("content", "")
-            word_count = len(content)
+            content_len = len(content)
             
-            # 如果内容未超过最大长度，直接添加
-            if word_count <= self.max_segment_length:
+            if content_len <= self.max_segment_length:
                 segments.append({
                     "id": str(section_idx),
                     "name": name,
@@ -96,35 +39,16 @@ class NLPService:
                     "part_index": None,
                     "total_parts": 1
                 })
-                logger.debug(f"章节 {section_idx} '{name}': {word_count} 字符，无需拆分")
             else:
-                # 需要拆分
-                split_segments = self._split_long_content(
-                    content=content,
-                    section_name=name,
-                    section_index=section_idx
-                )
+                split_segments = self._split_long_content(content, name, section_idx)
                 segments.extend(split_segments)
-                logger.info(f"章节 {section_idx} '{name}': {word_count} 字符，拆分为 {len(split_segments)} 部分")
+                logger.info(f"章节 {section_idx} '{name}' 拆分为 {len(split_segments)} 部分，原长度: {content_len}")
         
-        logger.info(f"处理完成，共生成 {len(segments)} 个片段")
+        logger.info(f"处理完成，生成 {len(segments)} 个片段")
         return segments
     
     def _split_long_content(self, content: str, section_name: str, section_index: int) -> List[Dict[str, Any]]:
-        """
-        拆分超长内容为多个片段
-        
-        优先在段落边界拆分，如果单个段落过长则在句子边界拆分
-        
-        Args:
-            content: 章节内容
-            section_name: 章节名称
-            section_index: 章节索引
-        
-        Returns:
-            List[Dict]: 拆分后的片段列表
-        """
-        # 先按段落拆分（连续两个换行符）
+        """拆分超长内容，优先按段落边界拆分"""
         paragraphs = re.split(r'\n\s*\n', content)
         
         segments = []
@@ -185,12 +109,7 @@ class NLPService:
         return result
     
     def _split_by_sentences(self, text: str) -> List[str]:
-        """
-        按句子边界拆分文本
-        
-        支持中英文句子分隔符：。！？.!?
-        """
-        # 句子分隔符（中英文）
+        """按句子边界拆分文本"""
         sentence_pattern = r'([。！？\.!?]+[\s]*)'
         sentences = re.split(sentence_pattern, text)
         
@@ -224,9 +143,7 @@ class NLPService:
         return segments
     
     def _split_by_length(self, text: str) -> List[str]:
-        """
-        强制按固定长度拆分文本（最后手段）
-        """
+        """强制按固定长度拆分文本"""
         segments = []
         start = 0
         
@@ -243,13 +160,9 @@ class NLPService:
         abstract: str,
         skip_abstract_section: bool = True
     ) -> List[Dict[str, Any]]:
-        """分析章节片段，拆分章节的后续部分将接收前面部分的摘要作为上下文"""
+        """分析章节片段，拆分章节后续部分将接收前面部分的摘要作为上下文"""
         if not segments:
-            logger.warning("没有需要分析的片段")
-            return []
-        
-        if not self.system_prompt:
-            logger.error("系统提示词未加载，无法进行分析")
+            logger.warning("无需分析的片段")
             return []
         
         logger.info(f"开始分析，片段数: {len(segments)}, Abstract长度: {len(abstract)}")
@@ -269,7 +182,7 @@ class NLPService:
             if skip_abstract_section:
                 name_lower = segment_name.lower()
                 if "abstract" in name_lower or "摘要" in segment_name:
-                    logger.info(f"跳过Abstract章节: {segment_id}")
+                    logger.info(f"跳过Abstract [{segment_id}]")
                     skipped_count += 1
                     continue
             
@@ -277,10 +190,9 @@ class NLPService:
             if is_split and part_index and part_index > 1:
                 if original_section_index in split_section_summaries:
                     previous_summaries = split_section_summaries[original_section_index]
-                    logger.info(f"使用前置摘要: {segment_id}, 前置部分数: {len(previous_summaries)}")
             
             user_prompt = self._build_user_prompt(abstract, segment_name, segment_content, previous_summaries)
-            logger.info(f"分析进度: [{idx}/{len(segments)}], ID: {segment_id}")
+            logger.info(f"分析进度 [{idx}/{len(segments)}] ID: {segment_id}, 长度: {len(segment_content)}")
             
             max_retries = 3
             retry_count = 0
@@ -289,27 +201,23 @@ class NLPService:
             
             while retry_count < max_retries:
                 try:
-                    nlp_response = nlp_client.chat_sync(
-                        prompt=user_prompt,
-                        system_prompt=self.system_prompt
-                    )
-                    analysis_result = self._parse_nlp_response(nlp_response, segment_id, segment_name)
+                    answer = ""
+                    for chunk in analyze_text(query=user_prompt):
+                        answer = chunk
+                    
+                    if answer:
+                        analysis_result = self._parse_dify_response(answer, segment_id, segment_name)
                     break
+                    
                 except Exception as e:
                     retry_count += 1
                     last_error = e
-                    error_msg = str(e)
+                    logger.error(f"API调用失败 [{segment_id}] 第{retry_count}次: {str(e)}")
                     
-                    if "peer closed connection" in error_msg or "incomplete chunked read" in error_msg:
-                        logger.warning(f"网络错误，重试: {retry_count}/{max_retries}, ID: {segment_id}")
-                        if retry_count < max_retries:
-                            wait_time = retry_count * 2
-                            logger.info(f"等待重试: {wait_time}秒")
-                            time.sleep(wait_time)
-                            continue
-                    else:
-                        logger.error(f"分析失败: {segment_id}, 错误: {error_msg}")
-                        break
+                    if retry_count < max_retries:
+                        wait_time = 2 ** retry_count
+                        logger.info(f"等待{wait_time}秒后重试")
+                        time.sleep(wait_time)
             
             if analysis_result:
                 analysis_result["id"] = segment_id
@@ -326,22 +234,23 @@ class NLPService:
                         analysis_result["previous_part_summary"] = " ".join([s["summary"] for s in previous_summaries])
                 
                 results.append(analysis_result)
-                logger.info(f"分析完成: {segment_id}")
+                logger.info(f"分析完成 [{segment_id}]")
             else:
                 error_msg = str(last_error) if last_error else "未知错误"
-                logger.error(f"分析失败，已重试{max_retries}次: {segment_id}, 错误: {error_msg}")
+                logger.error(f"分析失败 [{segment_id}]: {error_msg}")
                 results.append({
                     "id": segment_id,
                     "section_name": segment_name,
-                    "summary": f"分析失败，已重试{max_retries}次: {error_msg}",
+                    "summary": f"分析失败: {error_msg}",
                     "key_points": [],
-                    "error": error_msg,
-                    "retry_count": retry_count
+                    "error": error_msg
                 })
+            
+            if idx < len(segments):
+                time.sleep(1)
         
         success_count = len([r for r in results if not r.get('error')])
-        failure_count = len([r for r in results if r.get('error')])
-        logger.info(f"分析完成，成功: {success_count}, 失败: {failure_count}, 跳过: {skipped_count}")
+        logger.info(f"分析完成，成功: {success_count}, 失败: {len(results) - success_count}, 跳过: {skipped_count}")
         return results
     
     def _build_user_prompt(
@@ -351,7 +260,7 @@ class NLPService:
         section_content: str,
         previous_summaries: Optional[List[Dict[str, Any]]] = None
     ) -> str:
-        """构建用户提示词"""
+        """构建分析提示词"""
         prompt = f"""abstract: {abstract}
 
 name: {section_name}"""
@@ -368,12 +277,10 @@ content: {section_content}"""
         
         return prompt
     
-    def _parse_nlp_response(self, nlp_response: Dict[str, Any], segment_id: str, segment_name: str) -> Dict[str, Any]:
-        """解析NLP响应"""
+    def _parse_dify_response(self, answer: str, segment_id: str, segment_name: str) -> Dict[str, Any]:
+        """解析Dify响应JSON"""
         try:
-            answer = nlp_response.get("answer", "")
             if not answer:
-                logger.warning(f"响应为空: {segment_id}")
                 return {"section_name": segment_name, "summary": "", "key_points": []}
             
             json_str = answer
@@ -383,22 +290,16 @@ content: {section_content}"""
                 json_str = json_str.split("```")[1].split("```")[0].strip()
             
             parsed = json.loads(json_str)
-            result = {
+            return {
                 "section_name": parsed.get("section_name", segment_name),
                 "summary": parsed.get("summary", ""),
                 "key_points": parsed.get("key_points", [])
             }
-            
-            usage = nlp_response.get("usage", {})
-            if usage:
-                logger.debug(f"Token使用: {segment_id}, {usage}")
-            
-            return result
         except json.JSONDecodeError as e:
-            logger.error(f"JSON解析失败: {segment_id}, 错误: {e}")
+            logger.error(f"JSON解析失败 [{segment_id}]: {str(e)}")
             return {"section_name": segment_name, "summary": answer, "key_points": []}
         except Exception as e:
-            logger.error(f"解析异常: {segment_id}, 错误: {e}")
+            logger.error(f"解析异常 [{segment_id}]: {str(e)}")
             return {"section_name": segment_name, "summary": "", "key_points": []}
 
 
