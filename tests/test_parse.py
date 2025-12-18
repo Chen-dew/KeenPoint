@@ -2,16 +2,18 @@
 
 import sys
 from pathlib import Path
+
+# 添加项目根目录到 Python 路径
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import json
-
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
-
 from app.services.parse_service import parse_markdown_for_summary
 
 # 测试文件路径
-MD_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\Lin_HRank_Filter_Pruning_Using_High-Rank_Feature_Map_CVPR_2020_paper\full.md"
-JSON_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\Lin_HRank_Filter_Pruning_Using_High-Rank_Feature_Map_CVPR_2020_paper\c14e519a-40e7-43a2-a5be-50a9b4182bf5_content_list.json"
+MD_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\acl20_104\full.md"
+JSON_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\acl20_104\9eafd4f2-7e84-4bf8-b8ae-7fd19e07a68b_content_list.json"
 
 print("=" * 70)
 print("解析功能测试")
@@ -74,7 +76,7 @@ try:
     print(f"- 包含 tables: {'tables' in result}")
     
     # 保存结果
-    output_file = "test_modified_output.json"
+    output_file = r"D:\MyFiles\AIPPT\Code\keenPoint\outputs\test_parse_output.json"
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
     

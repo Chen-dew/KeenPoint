@@ -2,9 +2,8 @@
 
 from typing import List, Dict, Any, Optional
 from app.core.logger import logger
-from app.services.clients.dify_client import analyze_text
+from app.services.clients.dify_workflow_client import analyze_summary
 import re
-import json
 import time
 
 
@@ -194,30 +193,24 @@ class NLPService:
             user_prompt = self._build_user_prompt(abstract, segment_name, segment_content, previous_summaries)
             logger.info(f"分析进度 [{idx}/{len(segments)}] ID: {segment_id}, 长度: {len(segment_content)}")
             
-            max_retries = 3
-            retry_count = 0
             analysis_result = None
-            last_error = None
+            error_msg = None
             
-            while retry_count < max_retries:
-                try:
-                    answer = ""
-                    for chunk in analyze_text(query=user_prompt):
-                        answer = chunk
+            try:
+                # 调用 workflow 分析（阻塞模式，直接返回结构化数据）
+                result = analyze_summary(user_prompt=user_prompt)
+                
+                if result:
+                    # 阻塞模式直接返回字典，简化处理
+                    analysis_result = {
+                        "section_name": result.get("section_name", segment_name),
+                        "summary": result.get("summary", ""),
+                        "key_points": result.get("key_points", [])
+                    }
                     
-                    if answer:
-                        analysis_result = self._parse_dify_response(answer, segment_id, segment_name)
-                    break
-                    
-                except Exception as e:
-                    retry_count += 1
-                    last_error = e
-                    logger.error(f"API调用失败 [{segment_id}] 第{retry_count}次: {str(e)}")
-                    
-                    if retry_count < max_retries:
-                        wait_time = 2 ** retry_count
-                        logger.info(f"等待{wait_time}秒后重试")
-                        time.sleep(wait_time)
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"分析失败 [{segment_id}]: {error_msg}")
             
             if analysis_result:
                 analysis_result["id"] = segment_id
@@ -236,14 +229,14 @@ class NLPService:
                 results.append(analysis_result)
                 logger.info(f"分析完成 [{segment_id}]")
             else:
-                error_msg = str(last_error) if last_error else "未知错误"
-                logger.error(f"分析失败 [{segment_id}]: {error_msg}")
+                err = error_msg or "未知错误"
+                logger.error(f"分析失败 [{segment_id}]: {err}")
                 results.append({
                     "id": segment_id,
                     "section_name": segment_name,
-                    "summary": f"分析失败: {error_msg}",
+                    "summary": f"分析失败: {err}",
                     "key_points": [],
-                    "error": error_msg
+                    "error": err
                 })
             
             if idx < len(segments):
@@ -276,31 +269,6 @@ previous_parts_summary: {previous_text}"""
 content: {section_content}"""
         
         return prompt
-    
-    def _parse_dify_response(self, answer: str, segment_id: str, segment_name: str) -> Dict[str, Any]:
-        """解析Dify响应JSON"""
-        try:
-            if not answer:
-                return {"section_name": segment_name, "summary": "", "key_points": []}
-            
-            json_str = answer
-            if "```json" in json_str:
-                json_str = json_str.split("```json")[1].split("```")[0].strip()
-            elif "```" in json_str:
-                json_str = json_str.split("```")[1].split("```")[0].strip()
-            
-            parsed = json.loads(json_str)
-            return {
-                "section_name": parsed.get("section_name", segment_name),
-                "summary": parsed.get("summary", ""),
-                "key_points": parsed.get("key_points", [])
-            }
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON解析失败 [{segment_id}]: {str(e)}")
-            return {"section_name": segment_name, "summary": answer, "key_points": []}
-        except Exception as e:
-            logger.error(f"解析异常 [{segment_id}]: {str(e)}")
-            return {"section_name": segment_name, "summary": "", "key_points": []}
 
 
 nlp_service = NLPService()

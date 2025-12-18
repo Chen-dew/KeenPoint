@@ -4,9 +4,9 @@ import re
 import json
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from app.core.logger import logger
-from app.services.clients.dify_client import analyze_image, get_image_client
+from app.services.clients.dify_workflow_client import analyze_images, upload_files
 
 
 def _extract_local_context(content: str, element_id: int, element_type: str, window_size: int = 200) -> str:
@@ -110,12 +110,54 @@ def extract_elements_with_context(parse_result: Dict[str, Any]) -> List[Dict[str
 
 
 def analyze_elements_with_dify(elements: List[Dict[str, Any]], base_path: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """使用 Dify 分析图表公式"""
+    """使用 Dify 分析图表公式（支持批量上传优化）"""
     if not elements:
         logger.warning("无元素需分析")
         return []
     
     logger.info(f"开始分析: {len(elements)} 个元素")
+    
+    # 第一步：收集所有需要上传的图片
+    elements_to_upload = []
+    upload_paths = []
+    element_map = {}  # 用于映射上传结果
+    
+    for idx, elem_data in enumerate(elements):
+        element = elem_data.get("element", {})
+        element_type = element.get("type")
+        element_id = element.get("id")
+        img_path = element.get("img_path", "")
+        
+        if not img_path:
+            logger.debug(f"{element_type}-{element_id}: 无图片路径，跳过")
+            continue
+        
+        full_img_path = (base_path / img_path) if base_path else Path(img_path)
+        if not full_img_path.exists():
+            logger.warning(f"{element_type}-{element_id}: 图片不存在 {full_img_path}")
+            continue
+        
+        elements_to_upload.append((idx, elem_data, full_img_path))
+        upload_paths.append(full_img_path)
+        element_map[str(full_img_path)] = (idx, elem_data)
+    
+    # 第二步：批量上传所有图片
+    file_id_map = {}
+    if upload_paths:
+        logger.info(f"批量上传 {len(upload_paths)} 个图片")
+        try:
+            upload_results = upload_files(upload_paths, continue_on_error=True)
+            
+            for result in upload_results:
+                if result.get('success'):
+                    file_id_map[result['file_path']] = result['file_id']
+                    logger.debug(f"上传成功: {Path(result['file_path']).name}")
+                else:
+                    logger.warning(f"上传失败: {Path(result['file_path']).name}")
+        except Exception as e:
+            logger.error(f"批量上传异常: {str(e)}")
+    
+    # 第三步：逐个分析元素
     results = []
     
     for idx, elem_data in enumerate(elements, 1):
@@ -124,34 +166,27 @@ def analyze_elements_with_dify(elements: List[Dict[str, Any]], base_path: Option
         element_id = element.get("id")
         img_path = element.get("img_path", "")
         
-        logger.info(f"[{idx}/{len(elements)}] {element_type}-{element_id}")
+        logger.debug(f"[{idx}/{len(elements)}] {element_type}-{element_id}")
         
         # 验证图片路径
         if not img_path:
-            logger.warning(f"{element_type}-{element_id}: 无图片路径")
-            results.append({**elem_data, "analysis": None, "error": "无图片路径"})
-            continue
-        
-        full_img_path = (base_path / img_path) if base_path else Path(img_path)
-        if not full_img_path.exists():
-            logger.warning(f"{element_type}-{element_id}: 图片不存在 {full_img_path}")
-            results.append({**elem_data, "analysis": None, "error": "图片不存在"})
-            continue
-        
-        # 上传图片
-        try:
-            client = get_image_client()
-            upload_result = client.upload_file(str(full_img_path))
-            uploaded_file_id = upload_result.get('id')
-            logger.info(f"上传成功: {uploaded_file_id}")
-        except Exception as e:
-            logger.error(f"上传失败: {str(e)}")
-            results.append({**elem_data, "analysis": None, "error": f"上传失败: {str(e)}"})
-            continue
+            # 路径为空，使用空文件ID进行分析（某些元素如公式可能没有图片）
+            uploaded_file_id = None
+        else:
+            full_img_path = (base_path / img_path) if base_path else Path(img_path)
+            if not full_img_path.exists():
+                results.append({**elem_data, "analysis": None, "error": "图片不存在"})
+                continue
+            
+            # 获取上传的文件ID
+            uploaded_file_id = file_id_map.get(str(full_img_path))
+            if not uploaded_file_id:
+                results.append({**elem_data, "analysis": None, "error": "文件上传失败"})
+                continue
         
         # 构建提示词
         element_with_id = element.copy()
-        element_with_id['img_path'] = uploaded_file_id
+        element_with_id['img_path'] = uploaded_file_id or ""
         
         prompt = json.dumps({
             "abstract": elem_data.get("abstract", ""),
@@ -160,33 +195,50 @@ def analyze_elements_with_dify(elements: List[Dict[str, Any]], base_path: Option
             "section_content": elem_data.get("section_content", "")
         }, ensure_ascii=False, indent=2)
         
-        # 分析（带重试）
+        # 分析（阻塞模式直接返回结构化数据）
         analysis_result = None
-        last_error = None
+        error_msg = None
         
-        for retry in range(3):
-            try:
-                answer = ""
-                for chunk in analyze_image(query=prompt, file_ids=[uploaded_file_id], auto_upload=False):
-                    answer = chunk
+        try:
+            # 如果有文件ID则传递，否则传递空列表
+            file_ids_param = [uploaded_file_id] if uploaded_file_id else None
+            
+            # 使用 workflow analyze_images，阻塞模式直接返回结果
+            answer = analyze_images(
+                user_prompt=prompt,
+                file_ids=file_ids_param,
+                llm_id=2,
+                auto_upload=False
+            )
+            
+            # 打印阻塞模式返回的原始结果
+            logger.info(f"=== 阻塞模式返回结果 ({element_type}-{element_id}) ===")
+            logger.info(f"结果类型: {type(answer).__name__}")
+            logger.info(f"结果内容: {json.dumps(answer, ensure_ascii=False, indent=2) if isinstance(answer, dict) else answer}")
+            logger.info("=" * 60)
+            
+            if answer:
+                # 阻塞模式直接返回字典，简化处理
+                analysis_result = {
+                    "element_id": answer.get("element_id", element_id),
+                    "element_type": answer.get("element_type", element_type),
+                    "ppt_content": answer.get("ppt_content", {"title": "", "bullet_points": [], "highlight": ""}),
+                    "speaker_notes": answer.get("speaker_notes", {"explanation": "", "key_reasoning": [], "interpretation_details": ""}),
+                    "raw_response": answer
+                }
                 
-                if answer:
-                    analysis_result = _parse_analysis_response(answer, element_type, element_id)
-                    break
-            except Exception as e:
-                last_error = e
-                logger.error(f"分析失败 (重试{retry + 1}/3): {str(e)}")
-                if retry < 2:
-                    time.sleep(2 ** (retry + 1))
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"分析失败 ({element_type}-{element_id}): {error_msg}")
         
         # 保存结果
         if analysis_result:
             results.append({**elem_data, "prompt": prompt, "analysis": analysis_result, "error": None})
-            logger.info(f"分析完成: {element_type}-{element_id}")
+            logger.debug(f"分析完成: {element_type}-{element_id}")
         else:
-            error_msg = str(last_error) if last_error else "未知错误"
-            results.append({**elem_data, "prompt": prompt, "analysis": None, "error": error_msg})
-            logger.error(f"分析失败: {element_type}-{element_id} - {error_msg}")
+            err = error_msg or "未知错误"
+            results.append({**elem_data, "prompt": prompt, "analysis": None, "error": err})
+            logger.error(f"分析失败: {element_type}-{element_id}")
         
         if idx < len(elements):
             time.sleep(1)
@@ -195,51 +247,3 @@ def analyze_elements_with_dify(elements: List[Dict[str, Any]], base_path: Option
     logger.info(f"分析完成: 成功 {success}, 失败 {len(results) - success}")
     return results
 
-
-def _parse_analysis_response(answer: str, element_type: str, element_id: int) -> Dict[str, Any]:
-    """解析分析响应"""
-    default_result = {
-        "element_id": element_id,
-        "element_type": element_type,
-        "ppt_content": {"title": "", "bullet_points": [], "highlight": ""},
-        "speaker_notes": {"explanation": "", "key_reasoning": [], "interpretation_details": ""}
-    }
-    
-    if not answer:
-        return default_result
-    
-    # 提取JSON
-    json_str = answer.strip()
-    if "```json" in json_str:
-        json_str = json_str.split("```json")[1].split("```")[0].strip()
-    elif "```" in json_str:
-        json_str = json_str.split("```")[1].split("```")[0].strip()
-    
-    try:
-        parsed = json.loads(json_str)
-        return {
-            "element_id": parsed.get("element_id", element_id),
-            "element_type": parsed.get("element_type", element_type),
-            "ppt_content": {
-                "title": parsed.get("ppt_content", {}).get("title", ""),
-                "bullet_points": parsed.get("ppt_content", {}).get("bullet_points", []),
-                "highlight": parsed.get("ppt_content", {}).get("highlight", "")
-            },
-            "speaker_notes": {
-                "explanation": parsed.get("speaker_notes", {}).get("explanation", ""),
-                "key_reasoning": parsed.get("speaker_notes", {}).get("key_reasoning", []),
-                "interpretation_details": parsed.get("speaker_notes", {}).get("interpretation_details", "")
-            },
-            "raw_response": answer
-        }
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON解析失败 {element_type}-{element_id}: {str(e)}")
-        return {
-            **default_result,
-            "speaker_notes": {"explanation": answer[:500], "key_reasoning": [], "interpretation_details": ""},
-            "raw_response": answer,
-            "parse_error": str(e)
-        }
-    except Exception as e:
-        logger.error(f"解析异常 {element_type}-{element_id}: {str(e)}")
-        return {**default_result, "raw_response": answer, "parse_error": str(e)}

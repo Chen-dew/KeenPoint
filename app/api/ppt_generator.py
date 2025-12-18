@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, List, Optional
-from app.services import ppt_service
+from app.services import outline_service
 from app.core.logger import logger
 
 router = APIRouter()
@@ -55,7 +55,7 @@ async def generate_ppt(request: PPTGenerationRequest):
     
     try:
         # 生成 PPT
-        result = ppt_service.generate_ppt(
+        result = outline_service.generate_ppt(
             structure_data=request.structure_data,
             include_images=request.include_images,
             template=request.template,
@@ -133,7 +133,7 @@ async def customize_ppt(
     logger.info(f"🎨 自定义 PPT 样式: {ppt_path}")
     
     try:
-        result = ppt_service.customize_ppt(ppt_path, customizations)
+        result = outline_service.customize_ppt(ppt_path, customizations)
         
         return {
             "status": "success",

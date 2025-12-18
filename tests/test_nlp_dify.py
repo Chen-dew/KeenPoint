@@ -2,17 +2,19 @@
 
 import sys
 from pathlib import Path
+
+# 添加项目根目录到 Python 路径
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import json
-
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
-
 from app.services.parse_service import parse_markdown_for_summary
 from app.services.nlp_service import extract_and_split_sections, analyze_segments_with_abstract
 
 # 测试文件路径
-MD_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\Lin_HRank_Filter_Pruning_Using_High-Rank_Feature_Map_CVPR_2020_paper\full.md"
-JSON_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\Lin_HRank_Filter_Pruning_Using_High-Rank_Feature_Map_CVPR_2020_paper\c14e519a-40e7-43a2-a5be-50a9b4182bf5_content_list.json"
+MD_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\acl20_104\full.md"
+JSON_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\acl20_104\9eafd4f2-7e84-4bf8-b8ae-7fd19e07a68b_content_list.json"
 
 print("=" * 70)
 print("NLP 服务测试 - Dify 文本分析")
@@ -35,6 +37,22 @@ try:
     if split_sections:
         print(f"  - 有 {len(split_sections)} 个片段是拆分的")
     
+    # 只选择第一个非Abstract章节进行测试
+    print("\n选择测试章节...")
+    test_segments = []
+    for segment in segments:
+        segment_name = segment.get('name', '').lower()
+        if 'abstract' not in segment_name and '摘要' not in segment_name:
+            test_segments = [segment]
+            print(f"✓ 选择章节: {segment.get('name')}")
+            break
+    
+    if not test_segments:
+        test_segments = [segments[0]] if segments else []
+        print(f"✓ 未找到非Abstract章节，使用第一个章节")
+    
+    segments = test_segments
+    
     # 第三步：提取摘要（从第一个章节或 Abstract 章节）
     print("\n步骤 3: 提取摘要...")
     abstract = ""
@@ -50,9 +68,9 @@ try:
         abstract = sections[0].get('content', '')[:500]
         print(f"✓ 未找到 Abstract，使用第一个章节前 500 字符")
     
-    # 第四步：使用 Dify 进行文本分析（测试全部章节）
+    # 第四步：使用 Dify 进行文本分析（只测试一个章节）
     print("\n步骤 4: 使用 Dify 进行文本分析...")
-    print(f"准备分析全部 {len(segments)} 个片段\n")
+    print(f"准备分析 1 个章节: {segments[0].get('name')}\n")
     
     analysis_results = analyze_segments_with_abstract(
         segments=segments,
@@ -86,7 +104,7 @@ try:
             print(f"\n⚠ 错误: {result.get('error')}")
     
     # 保存结果
-    output_file = "test_nlp_dify_output.json"
+    output_file = r"D:\MyFiles\AIPPT\Code\keenPoint\outputs\test_nlp_dify_output.json"
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump({
             "segments": segments,

@@ -1,9 +1,14 @@
-"""
-测试图表公式分析功能
-"""
+"""测试图表公式分析功能"""
+
+import sys
+from pathlib import Path
+
+# 添加项目根目录到 Python 路径
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import json
-from pathlib import Path
 from app.services.parse_service import parse_markdown_for_summary
 from app.services.image_service import extract_elements_with_context, analyze_elements_with_dify
 from app.core.logger import logger
@@ -11,9 +16,9 @@ from app.core.logger import logger
 
 def main():
     # 设置路径
-    base_dir = Path(r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\Lin_HRank_Filter_Pruning_Using_High-Rank_Feature_Map_CVPR_2020_paper")
-    md_file = Path(r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\Lin_HRank_Filter_Pruning_Using_High-Rank_Feature_Map_CVPR_2020_paper\full.md")
-    json_file = Path(r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\Lin_HRank_Filter_Pruning_Using_High-Rank_Feature_Map_CVPR_2020_paper\c14e519a-40e7-43a2-a5be-50a9b4182bf5_content_list.json")
+    base_dir = Path(r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\acl20_104")
+    md_file = Path(r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\acl20_104\full.md")
+    json_file = Path(r"D:\MyFiles\AIPPT\Code\keenPoint\downloads\acl20_104\9eafd4f2-7e84-4bf8-b8ae-7fd19e07a68b_content_list.json")
     image_base_path = base_dir
     
     logger.info(f"MD文件: {md_file}")
@@ -56,13 +61,23 @@ def main():
     
     logger.info(f"提取结果已保存: {output_file}")
     
-    # 步骤3: 分析前3个图表元素（测试）
+    # 步骤3: 分析图表元素（只测试一个）
     logger.info("=" * 60)
-    logger.info("步骤3: 分析图表元素（测试前1个）")
+    logger.info("步骤3: 分析图表元素（只测试一个）")
     logger.info("=" * 60)
     
-    # 只取前1个元素进行测试
-    test_elements = elements[:1]
+    # 只测试第一个图片元素
+    test_elements = []
+    for elem in elements:
+        element = elem.get("element", {})
+        if element.get("type") == "image" and element.get("img_path"):
+            test_elements = [elem]
+            logger.info(f"选中的测试元素: Type={element.get('type')}, ID={element.get('id')}, Path={element.get('img_path')}")
+            break
+    
+    if not test_elements:
+        logger.error("未找到可测试的图片元素")
+        return
     
     logger.info(f"测试元素数: {len(test_elements)}")
     for i, elem in enumerate(test_elements, 1):
@@ -83,71 +98,33 @@ def main():
     # 打印成功/失败统计
     success_count = len([r for r in analysis_results if r.get("analysis")])
     failed_count = len([r for r in analysis_results if r.get("error")])
+    total_count = len(analysis_results)
     
     logger.info("=" * 60)
-    logger.info(f"分析完成: 成功 {success_count}, 失败 {failed_count}")
+    logger.info(f"分析完成: 总数 {total_count}, 成功 {success_count}, 失败 {failed_count}")
     logger.info("=" * 60)
     
-    # 打印部分分析结果示例
+    # 打印分析结果摘要
     if analysis_results:
-        logger.info("\n分析结果示例:")
+        logger.info("\n" + "=" * 60)
+        logger.info("分析结果摘要")
+        logger.info("=" * 60)
+        
         for i, result in enumerate(analysis_results, 1):
             element = result.get("element", {})
             analysis = result.get("analysis", {})
-            prompt = result.get("prompt", "")
-            dify_metadata = result.get("dify_metadata", {})
-            conversation_id = result.get("conversation_id", "")
             
-            logger.info(f"\n{'='*60}")
-            logger.info(f"元素 {i}")
-            logger.info(f"{'='*60}")
-            logger.info(f"类型: {element.get('type')}")
-            logger.info(f"ID: {element.get('id')}")
-            logger.info(f"标题: {element.get('caption', 'N/A')}")
-            
-            # 显示Dify元数据
-            if dify_metadata:
-                usage = dify_metadata.get('usage', {})
-                logger.info(f"\nDify调用信息:")
-                logger.info(f"  会话ID: {conversation_id}")
-                logger.info(f"  Prompt Tokens: {usage.get('prompt_tokens', 'N/A')}")
-                logger.info(f"  Completion Tokens: {usage.get('completion_tokens', 'N/A')}")
-                logger.info(f"  Total Tokens: {usage.get('total_tokens', 'N/A')}")
-                logger.info(f"  总价格: {usage.get('total_price', 'N/A')} {usage.get('currency', '')}")
-                logger.info(f"  延迟: {usage.get('latency', 'N/A')}s")
-            
-            logger.info(f"\n提示词 (前500字符):\n{prompt[:500]}...")
+            status = "✓" if analysis else "✗"
+            element_type = element.get('type', 'N/A')
+            element_id = element.get('id', 'N/A')
             
             if analysis:
-                # 显示新的返回结构
-                ppt_content = analysis.get('ppt_content', {})
-                speaker_notes = analysis.get('speaker_notes', {})
-                
-                logger.info(f"\n{'─'*60}")
-                logger.info("PPT内容:")
-                logger.info(f"{'─'*60}")
-                logger.info(f"标题: {ppt_content.get('title', 'N/A')}")
-                logger.info(f"\n要点 ({len(ppt_content.get('bullet_points', []))} 个):")
-                for idx, point in enumerate(ppt_content.get('bullet_points', []), 1):
-                    logger.info(f"  {idx}. {point}")
-                logger.info(f"\n重点: {ppt_content.get('highlight', 'N/A')}")
-                
-                logger.info(f"\n{'─'*60}")
-                logger.info("演讲者笔记:")
-                logger.info(f"{'─'*60}")
-                logger.info(f"解释:\n{speaker_notes.get('explanation', 'N/A')}")
-                logger.info(f"\n关键推理 ({len(speaker_notes.get('key_reasoning', []))} 个):")
-                for idx, reasoning in enumerate(speaker_notes.get('key_reasoning', []), 1):
-                    logger.info(f"  {idx}. {reasoning}")
-                logger.info(f"\n解读细节:\n{speaker_notes.get('interpretation_details', 'N/A')}")
-                
-                # 如果有解析错误，显示原始响应
-                if analysis.get('parse_error'):
-                    logger.info(f"\n{'─'*60}")
-                    logger.info(f"解析错误: {analysis.get('parse_error')}")
-                    logger.info(f"原始响应 (前1000字符):\n{analysis.get('raw_response', '')[:1000]}...")
+                ppt_title = analysis.get('ppt_content', {}).get('title', 'N/A')
+                bullet_count = len(analysis.get('ppt_content', {}).get('bullet_points', []))
+                logger.info(f"{status} [{i}/{len(analysis_results)}] {element_type}-{element_id}: {ppt_title} ({bullet_count} 要点)")
             else:
-                logger.info(f"\n错误: {result.get('error')}")
+                error = result.get('error', 'Unknown')
+                logger.info(f"{status} [{i}/{len(analysis_results)}] {element_type}-{element_id}: 失败 - {error}")
 
 
 if __name__ == "__main__":

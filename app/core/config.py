@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 import os
 
+import app
+
 class Settings(BaseSettings):
     """应用配置类"""
     
@@ -51,8 +53,11 @@ class Settings(BaseSettings):
     # Dify 配置
     DIFY_IMAGE_API_KEY: Optional[str] = "app-x0l8Aj6TPR3dge76Lg5x1tRA"  # 图像分析 API Key
     DIFY_TEXT_API_KEY: Optional[str] = "app-LAveMnIbI7rybMZ5hVJnJgpP"  # 文本分析 API Key
+    DIFY_OUTLINE_API_KEY: Optional[str] = "app-K26syjVR08K1nMeEeWoCXdI2"  # 大纲分析 API Key
+    DIFY_WORKFLOW_API_KEY: Optional[str] = "app-VWzZqV55lOhVZoQm91SGaSLO"  # Workflow 工作流 API Key
     DIFY_API_BASE_URL: str = "https://api.dify.ai/v1"
     DIFY_USER: str = "keenpoint-user"
+    DIFY_WORKFLOW_USER: str = "chen"  # Workflow 默认用户
     
     # PPT 生成配置
     PPT_DEFAULT_TEMPLATE: str = "default"
