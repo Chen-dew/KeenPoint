@@ -1,35 +1,90 @@
-"""
-API 路由聚合器
-整合所有业务模块的路由到统一的 router
-"""
+"""API路由"""
 
-from fastapi import APIRouter
-from . import upload, analysis, image_manager, ppt_generator
+import json
+from pathlib import Path
+from typing import Optional
 
-# 创建主路由器
-router = APIRouter(prefix="/api/v1")
+from fastapi import APIRouter, UploadFile, File, HTTPException
 
-# 注册各功能模块的路由
-router.include_router(
-    upload.router,
-    prefix="/upload",
-    tags=["📤 文档上传"]
-)
+from app.core.logger import logger
+from app.core.config import settings
+from app.services.parse_service import parse_markdown
+from app.services.nlp_service import analyze_full_document, extract_article_basic_info
+from app.services.image_service import extract_elements, analyze_elements
+from app.services.outline_service import build_outline, analyze_outline
 
-router.include_router(
-    analysis.router,
-    prefix="/analysis",
-    tags=["🔍 结构分析"]
-)
+router = APIRouter()
 
-router.include_router(
-    image_manager.router,
-    prefix="/images",
-    tags=["🖼️ 图像管理"]
-)
 
-router.include_router(
-    ppt_generator.router,
-    prefix="/ppt",
-    tags=["📊 PPT生成"]
-)
+@router.post("/parse")
+async def api_parse(md_path: str, json_path: Optional[str] = None):
+    """解析Markdown文档"""
+    logger.info(f"[API] parse: {md_path}")
+    try:
+        result = parse_markdown(md_path, json_path)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        logger.error(f"[API] parse error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analyze/basic")
+async def api_analyze_basic(parse_result: dict):
+    """提取文章基础信息"""
+    logger.info("[API] analyze/basic")
+    try:
+        result = extract_article_basic_info(parse_result)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        logger.error(f"[API] analyze/basic error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analyze/full")
+async def api_analyze_full(parse_result: dict, abstract: str = ""):
+    """完整文档分析"""
+    logger.info("[API] analyze/full")
+    try:
+        result = analyze_full_document(parse_result, abstract)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        logger.error(f"[API] analyze/full error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analyze/images")
+async def api_analyze_images(parse_result: dict, base_path: Optional[str] = None):
+    """图表分析"""
+    logger.info("[API] analyze/images")
+    try:
+        elements = extract_elements(parse_result)
+        bp = Path(base_path) if base_path else None
+        result = analyze_elements(elements, bp)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        logger.error(f"[API] analyze/images error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/outline/build")
+async def api_outline_build(parse_result: dict, text_analysis: list, visual_analysis: list):
+    """构建大纲输入"""
+    logger.info("[API] outline/build")
+    try:
+        result = build_outline(parse_result, text_analysis, visual_analysis)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        logger.error(f"[API] outline/build error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/outline/analyze")
+async def api_outline_analyze(outline_inputs: list):
+    """大纲分析"""
+    logger.info("[API] outline/analyze")
+    try:
+        result = analyze_outline(outline_inputs)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        logger.error(f"[API] outline/analyze error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

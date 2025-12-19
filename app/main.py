@@ -1,71 +1,47 @@
-"""
-FastAPI 主应用入口
-提供学术论文辅助系统的核心 API 服务
-"""
+"""KeenPoint API服务"""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import routes
-from app.core.config import settings
+
+from app.api.routes import router
+from app.core.config import settings, ensure_dirs
 from app.core.logger import logger
 
-# 创建 FastAPI 应用实例
+
 app = FastAPI(
-    title="Academic Paper Assistant",
-    description="AI 学术论文辅助网站 - 支持文档解析、结构分析、图像管理和 PPT 生成",
-    version="0.1.0",
+    title=settings.APP_NAME,
+    version=settings.VERSION,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url=None
 )
 
-# 配置 CORS 中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应限制为特定域名
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 注册所有 API 路由
-app.include_router(routes.router)
+app.include_router(router, prefix="/api/v1")
+
 
 @app.on_event("startup")
-async def startup_event():
-    """应用启动时执行的操作"""
-    logger.info("🚀 Academic Paper Assistant API 正在启动...")
-    logger.info(f"📝 环境: {settings.ENVIRONMENT}")
-    logger.info(f"📁 上传目录: {settings.UPLOAD_DIR}")
+async def startup():
+    ensure_dirs()
+    logger.info(f"[APP] {settings.APP_NAME} v{settings.VERSION} started")
+
 
 @app.on_event("shutdown")
-async def shutdown_event():
-    """应用关闭时执行的操作"""
-    logger.info("👋 Academic Paper Assistant API 正在关闭...")
+async def shutdown():
+    logger.info("[APP] shutdown")
+
 
 @app.get("/")
-def home():
-    """
-    API 根路径 - 欢迎页面
-    """
-    return {
-        "message": "Welcome to the Academic Paper Assistant API 🚀",
-        "version": "0.1.0",
-        "docs": "/docs",
-        "features": [
-            "文档解析 (PDF/Word)",
-            "结构分析 (章节识别)",
-            "图像管理 (提取与分类)",
-            "PPT 生成 (自动演示文稿)"
-        ]
-    }
+def root():
+    return {"name": settings.APP_NAME, "version": settings.VERSION}
+
 
 @app.get("/health")
-def health_check():
-    """
-    健康检查接口
-    """
-    return {
-        "status": "healthy",
-        "service": "Academic Paper Assistant",
-        "version": "0.1.0"
-    }
+def health():
+    return {"status": "ok"}
