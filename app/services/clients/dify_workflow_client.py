@@ -83,38 +83,6 @@ class DifyClient:
         )
         resp.raise_for_status()
         return resp.json()
-    
-    def run_stream(self, llm_id: int, prompt: str, extra: Dict = None, timeout: int = 300) -> Generator[str, None, None]:
-        """流式执行workflow"""
-        inputs = {"llm_id": llm_id, "user_prompt": prompt}
-        if extra:
-            inputs.update(extra)
-        
-        payload = {"inputs": inputs, "response_mode": "streaming", "user": self.user}
-        
-        with requests.post(
-            f"{self.base_url}/workflows/run",
-            headers=self.headers,
-            json=payload,
-            stream=True,
-            timeout=timeout
-        ) as resp:
-            resp.raise_for_status()
-            for line in resp.iter_lines():
-                if line:
-                    text = line.decode('utf-8')
-                    if text.startswith("data:"):
-                        try:
-                            data = json.loads(text[5:].strip())
-                            if data.get("event") == "text_chunk":
-                                yield data.get("data", {}).get("text", "")
-                            elif data.get("event") == "workflow_finished":
-                                outputs = data.get("data", {}).get("outputs", {})
-                                if outputs:
-                                    yield json.dumps(outputs)
-                        except:
-                            pass
-
 
 def _get_client(api_key: str = None, user: str = None) -> DifyClient:
     """获取客户端实例"""
@@ -163,8 +131,17 @@ def analyze_summary(user_prompt: str, llm_id: int = 1) -> Dict:
 
 def analyze_images(user_prompt: str, file_ids: List[str] = None, 
                    image_paths: List[Union[str, Path]] = None,
-                   llm_id: int = 2, auto_upload: bool = True) -> Dict:
-    """图像分析"""
+                   llm_id: int = 2, auto_upload: bool = True, allow_empty_files: bool = False) -> Dict:
+    """图像分析
+    
+    Args:
+        user_prompt: 提示词
+        file_ids: 文件ID列表
+        image_paths: 图片路径列表
+        llm_id: LLM ID
+        auto_upload: 是否自动上传
+        allow_empty_files: 是否允许空文件列表（用于纯文本分析，如公式）
+    """
     ids = list(file_ids) if file_ids else []
     
     # 自动上传
@@ -172,20 +149,25 @@ def analyze_images(user_prompt: str, file_ids: List[str] = None,
         results = upload_files(image_paths)
         ids.extend([r["file_id"] for r in results if r.get("success")])
     
-    if not ids:
+    # 检查是否有文件（equation等元素可能不需要文件）
+    if not ids and not allow_empty_files:
         raise ValueError("No valid file_ids")
     
-    extra = {
-        "images": [
-            {"transfer_method": "local_file", "upload_file_id": fid, "type": "image"}
-            for fid in ids
-        ]
-    }
+    # 构造extra参数（仅当有文件时）
+    extra = None
+    if ids:
+        extra = {
+            "images": [
+                {"transfer_method": "local_file", "upload_file_id": fid, "type": "image"}
+                for fid in ids
+            ]
+        }
     
     result = _get_client().run(llm_id, user_prompt, extra)
     return _extract_output(result)
 
 
-def run_outline(query: str, llm_id: int = 3) -> Generator[str, None, None]:
-    """大纲分析(流式)"""
-    return _get_client().run_stream(llm_id, query)
+def analyze_outline(query: str, llm_id: int = 3) -> Dict:
+    """大纲分析"""
+    result = _get_client().run(llm_id, query)
+    return _extract_output(result)

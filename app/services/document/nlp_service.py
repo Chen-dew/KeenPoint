@@ -17,7 +17,7 @@ class NLPService:
         """完整文档分析"""
         logger.info("[NLP] analyze_full_document start")
         
-        basic_info = self._extract_basic_info(parse_result)
+        basic_info = self._analyze_basic_info(parse_result)
         segments = self._extract_sections(parse_result)
         sections_analysis = self._analyze_sections(segments, abstract)
         
@@ -38,12 +38,24 @@ class NLPService:
             "statistics": stats
         }
     
-    def _extract_basic_info(self, parse_result: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_basic_info(self, parse_result: Dict[str, Any]) -> Dict[str, Any]:
         """提取文章基础信息"""
+        def make_result(title="", subtitle="", authors=None, affiliation="", date="", error=None):
+            result = {
+                "title": title,
+                "subtitle": subtitle,
+                "authors": authors or [],
+                "affiliation": affiliation,
+                "date": date
+            }
+            if error:
+                result["error"] = error
+            return result
+        
         sections = parse_result.get("sections", [])
         if not sections:
             logger.warning("[NLP] extract_basic_info: no sections")
-            return {"error": "No sections"}
+            return make_result(error="No sections")
         
         first = sections[0]
         content = first.get("content", "")
@@ -51,18 +63,25 @@ class NLPService:
         
         if not content:
             logger.warning("[NLP] extract_basic_info: first section empty")
-            return {"error": "First section empty"}
+            return make_result(error="First section empty")
         
         query = f"{name}\n\n{content}"
         logger.info(f"[NLP] extract_basic_info: len={len(query)}")
         
         try:
             result = analyze_basic(query=query)
-            logger.info("[NLP] extract_basic_info: success")
-            return result
+            logger.info(f"[NLP] extract_basic_info: success, result={result}")
+            
+            return make_result(
+                title=result.get("title", "") or "",
+                subtitle=result.get("subtitle", "") or "",
+                authors=result.get("authors", []) if isinstance(result.get("authors"), list) else [],
+                affiliation=result.get("affiliation", "") or "",
+                date=result.get("date", "") or ""
+            )
         except Exception as e:
             logger.error(f"[NLP] extract_basic_info: {e}")
-            return {"error": str(e)}
+            return make_result(error=str(e))
     
     def _extract_sections(self, parse_result: Dict[str, Any]) -> List[Dict[str, Any]]:
         """提取并拆分章节"""
@@ -250,7 +269,7 @@ def analyze_full_document(parse_result: Dict[str, Any], abstract: str) -> Dict[s
 
 def extract_article_basic_info(parse_result: Dict[str, Any]) -> Dict[str, Any]:
     """提取文章基础信息"""
-    return _service._extract_basic_info(parse_result)
+    return _service._analyze_basic_info(parse_result)
 
 
 def extract_and_split_sections(parse_result: Dict[str, Any]) -> List[Dict[str, Any]]:

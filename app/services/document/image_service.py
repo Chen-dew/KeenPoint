@@ -158,11 +158,15 @@ def analyze_elements(elements: List[Dict[str, Any]], base_path: Optional[Path] =
         
         # 调用分析
         try:
+            # equation类型通常没有图片，允许空文件列表
+            allow_empty = (etype == "equation" and not file_id)
+            
             answer = analyze_images(
                 user_prompt=prompt,
-                file_ids=[file_id] if file_id else None,
+                file_ids=[file_id] if file_id else [],
                 llm_id=2,
-                auto_upload=False
+                auto_upload=False,
+                allow_empty_files=allow_empty
             )
             
             if answer:
@@ -171,8 +175,7 @@ def analyze_elements(elements: List[Dict[str, Any]], base_path: Optional[Path] =
                     "analysis": {
                         "element_id": answer.get("element_id", eid),
                         "element_type": answer.get("element_type", etype),
-                        "ppt_content": answer.get("ppt_content", {}),
-                        "speaker_notes": answer.get("speaker_notes", {})
+                        "analysis_text": answer.get("analysis_text", "")
                     }
                 })
                 logger.info(f"[IMAGE] {etype}-{eid}: success")

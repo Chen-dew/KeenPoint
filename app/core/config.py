@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     LOG_FILE: str = "logs/app.log"
     
     # Dify API
-    DIFY_API_KEY: Optional[str] = None
+    DIFY_API_KEY: Optional[str] = "app-VWzZqV55lOhVZoQm91SGaSLO"
     DIFY_API_URL: str = "https://api.dify.ai/v1"
     DIFY_USER: str = "keenpoint"
     

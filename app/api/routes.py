@@ -8,10 +8,10 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 
 from app.core.logger import logger
 from app.core.config import settings
-from app.services.parse_service import parse_markdown
-from app.services.nlp_service import analyze_full_document, extract_article_basic_info
-from app.services.image_service import extract_elements, analyze_elements
-from app.services.outline_service import build_outline, analyze_outline
+from app.services.document.parse_service import parse_markdown
+from app.services.document.nlp_service import analyze_full_document, extract_article_basic_info
+from app.services.document.image_service import extract_elements, analyze_elements
+from app.services.document.outline_service import build_outline, analyze_outline
 
 router = APIRouter()
 

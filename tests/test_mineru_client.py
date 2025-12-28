@@ -1,54 +1,53 @@
-"""测试 MinerU API 客户端
-用于测试 PDF 文件上传、解析和下载功能
-"""
+"""测试 mineru_client"""
 
 import sys
-import asyncio
+import json
 from pathlib import Path
 
-# 添加项目根目录到 Python 路径
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.services.clients.mineru_client import main as mineru_main
+from app.services.clients.mineru_client import process_sync
+
+OUTPUT_FILE = r"D:\MyFiles\AIPPT\Code\keenPoint\outputs\test_mineru.json"
 
 
-async def test_mineru_single_file():
-    """测试单个 PDF 文件的解析"""
-    
-    # 测试文件路径
-    test_pdf = r"D:\MyFiles\AIPPT\Data\acl20_104.pdf"
-    
-    if not Path(test_pdf).exists():
-        print(f"❌ 测试文件不存在: {test_pdf}")
-        print("请修改 test_pdf 变量为您本地的 PDF 文件路径")
-        return
-    
+def test_process_files():
+    """测试PDF处理（需要有PDF文件）"""
     print("=" * 60)
-    print("测试 MinerU API 客户端")
+    print("TEST: mineru_client.process_sync")
     print("=" * 60)
-    print(f"测试文件: {test_pdf}")
-    print()
     
-    try:
-        # 调用 MinerU 客户端
-        await mineru_main([test_pdf])
-        
-        print("\n" + "=" * 60)
-        print("✅ MinerU 解析完成！")
-        print("=" * 60)
-        print(f"解析结果保存在: downloads/{Path(test_pdf).stem}/")
-        print("包含以下文件:")
-        print("  - full.md (完整的 Markdown 文档)")
-        print("  - images/ (提取的图片)")
-        print("  - *.json (结构化数据)")
-        
-    except Exception as e:
-        print(f"\n❌ 测试失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
+    # 查找测试PDF
+    test_pdfs = list(Path(r"D:\MyFiles\AIPPT\Code\keenPoint\uploads").rglob("*.pdf"))
+    
+    if not test_pdfs:
+        print("\n[跳过] 无测试PDF文件")
+        print("  请在 uploads/ 目录放置PDF文件后重试")
+        return {"status": "skipped", "reason": "No PDF files"}
+    
+    test_file = str(test_pdfs[0])
+    print(f"\n[测试文件] {test_file}")
+    print("\n[警告] 此测试会调用MinerU API并下载结果，可能需要较长时间")
+    
+    confirm = input("是否继续? (y/n): ")
+    if confirm.lower() != 'y':
+        print("[取消]")
+        return {"status": "cancelled"}
+    
+    print("\n[开始处理]...")
+    results = process_sync([test_file])
+    
+    print(f"\n[结果] {len(results)} 个文件")
+    for r in results:
+        print(f"  - {r.get('file_name')}: {r.get('state')}")
+    
+    # 保存结果
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    print(f"\n[输出] {OUTPUT_FILE}")
+    
+    return results
+
 
 if __name__ == "__main__":
-    # 直接运行单文件测试
-    asyncio.run(test_mineru_single_file())
+    test_process_files()
